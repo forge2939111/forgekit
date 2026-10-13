@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-"""
-ForgeKit (menu.py) — recon.py için SET (Social-Engineer Toolkit) tarzı numaralı menü arayüzü.
-
-ÖNEMLİ: Bu, SADECE görünüm/etkileşim biçimidir (banner + numaralı menü).
-İçeride çalışan tek şey recon.py'deki teknik keşif/servis-tespiti/bilinen-
-zafiyet-eşleştirme mantığıdır. Phishing, kimlik avı, sahte sayfa/mesaj,
-kullanıcı kandırma modülü YOKTUR ve eklenmeyecektir.
-
-Çalıştırma:
-    python3 menu.py
-"""
 import datetime
 import os
 import shutil
@@ -27,16 +16,10 @@ BANNER = r"""
   ██║     ╚██████╔╝██║  ██║╚██████╔╝███████╗██║  ██╗██║   ██║
   ╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝   ╚═╝
 
-        Eğitim / CTF Ağ Keşif ve Zafiyet-Farkındalık Araç Seti
-        (sömürü kodu YOK — sadece keşif, tespit, raporlama)
                     made by EFE KUŞCU
 """
 
 DISCLAIMER = """\
-Bu araç yalnızca kendi lab ortamınızda, CTF/eğitim platformlarında veya
-yazılı izniniz olan bir pentest kapsamında kullanılabilir. İzinsiz
-kullanım suç oluşturabilir.
-
 FOR LEGAL USE ONLY. I don't consent to this tool being used for any
 illegal purpose. The author is not responsible for misuse.
 """
@@ -135,16 +118,6 @@ def menu_view_results(sess):
     print("-" * 70)
     for s in sess.services:
         print(f"{s['port']:<8}{(s['product'] or '-'):<20}{(s['version'] or '-'):<15}{s['banner_excerpt'][:30]}")
-
-    print("\nBilinen zafiyet eşleşmeleri:")
-    any_hit = False
-    for s in sess.services:
-        for h in r.match_known_vulns(s["product"], s["version"]):
-            any_hit = True
-            print(f"  [Port {s['port']}] {s['product']} {s['version'] or ''} -> {h['cve']} ({h['severity']})")
-            print(f"      {h['desc']}")
-    if not any_hit:
-        print("  (eşleşme bulunamadı)")
     pause()
 
 
@@ -166,14 +139,6 @@ def menu_report(sess):
     print(f"\n[+] Rapor yazıldı: {md_path}")
     if json_path:
         print(f"[+] JSON yazıldı: {json_path}")
-    pause()
-
-
-def menu_vulndb():
-    print("\nYerel bilinen-zafiyet referans listesi (sadece bilgilendirme amaçlı):\n")
-    for e in r.KNOWN_VULN_DB:
-        print(f"- {e['product']:<16} desen={e['version_pattern']:<18} {e['cve']} [{e['severity']}]")
-        print(f"    {e['desc']}")
     pause()
 
 
@@ -358,6 +323,254 @@ Kurduktan sonra menüden tekrar deneyin.""")
     pause()
 
 
+def list_interfaces():
+    """/sys/class/net üzerinden ağ arayüzü adlarını listeler (ek paket gerekmez)."""
+    try:
+        return sorted(os.listdir("/sys/class/net"))
+    except OSError:
+        return []
+
+
+def menu_wireshark_gui():
+    ws_bin = shutil.which("wireshark")
+    if not ws_bin:
+        print("""
+[!] 'wireshark' bu sistemde kurulu değil veya PATH'te bulunamadı.
+
+Kurmak için:
+    Debian/Ubuntu/Kali : sudo apt install wireshark
+    Fedora             : sudo dnf install wireshark
+
+Kurulumda "non-root kullanıcıların paket yakalamasına izin ver" sorusuna
+evet derseniz sudo'suz da kullanabilirsiniz. Kurduktan sonra tekrar deneyin.""")
+        pause()
+        return
+    ifaces = list_interfaces()
+    if ifaces:
+        print(f"\nBulunan arayüzler: {', '.join(ifaces)}")
+    iface = ask("Dinlenecek arayüz (boş bırakırsanız Wireshark'ın kendi seçim ekranı açılır)", "")
+    cmd = [ws_bin] + (["-i", iface, "-k"] if iface else [])
+    run_tool(cmd)
+
+
+def menu_tshark_capture():
+    tshark_bin = shutil.which("tshark")
+    if not tshark_bin:
+        print("""
+[!] 'tshark' bu sistemde kurulu değil veya PATH'te bulunamadı.
+
+Kurmak için:
+    Debian/Ubuntu/Kali : sudo apt install tshark
+    Fedora             : sudo dnf install wireshark-cli
+
+Kurduktan sonra tekrar deneyin. (Not: 'tshark' genelde wireshark paketiyle
+birlikte de gelir.)""")
+        pause()
+        return
+    ifaces = list_interfaces()
+    if ifaces:
+        print(f"\nBulunan arayüzler: {', '.join(ifaces)}")
+    iface = ask("Dinlenecek arayüz", ifaces[0] if ifaces else "eth0")
+    bpf = ask("BPF filtresi (opsiyonel, örn. 'tcp port 80')", "")
+    count = ask("Kaç paket sonra dursun (boş = Ctrl+C ile siz durdurana kadar)", "")
+    save = ask("Bir .pcap dosyasına kaydedilsin mi? Dosya adı (boş = sadece ekrana yazdır)", "")
+
+    cmd = [tshark_bin, "-i", iface]
+    if bpf:
+        cmd += ["-f", bpf]
+    if count:
+        cmd += ["-c", count]
+    if save:
+        cmd += ["-w", save]
+
+    print("""
+[!] Paket yakalama, o ağdaki trafiği (içeriğiyle birlikte) görüntüler.
+    Sadece kendi ağınızda / kendi trafiğinizi incelemek ya da izinli bir
+    lab ortamında kullanın. Başkalarının trafiğini onay almadan
+    izlemek/kaydetmek yasa dışı olabilir.""")
+    ans = input("Devam etmek için EVET yazın: ")
+    if ans.strip() != "EVET":
+        print("Onaylanmadı, çıkılıyor.")
+        pause()
+        return
+    run_tool(cmd)
+    if save:
+        print(f"\n[+] Kayıt dosyası: {save} (Wireshark ile açıp inceleyebilirsiniz)")
+    pause()
+
+
+def submenu_traffic():
+    while True:
+        print("""
+======= AĞ TRAFİĞİ ANALİZİ (Wireshark) =======
+ 1) Wireshark'ı grafik arayüzle başlat
+ 2) tshark ile komut satırından paket yakala
+ 0) Ana menüye dön
+================================================""")
+        c = ask("Seçiminiz", "0")
+        if c == "1":
+            menu_wireshark_gui()
+        elif c == "2":
+            menu_tshark_capture()
+        elif c == "0":
+            return
+        else:
+            print("[!] Geçersiz seçim.")
+
+
+def menu_theharvester():
+    th_bin = shutil.which("theHarvester") or shutil.which("theharvester")
+    if not th_bin:
+        print("""
+[!] 'theHarvester' bu sistemde kurulu değil veya PATH'te bulunamadı.
+
+Kurmak için:
+    Debian/Ubuntu/Kali : sudo apt install theharvester
+    Diğer              : pip install theHarvester  (veya GitHub'dan klonlayın)
+
+Kurduktan sonra tekrar deneyin.""")
+        pause()
+        return
+    print("""
+[!] theHarvester, bir domain hakkında arama motorları/sertifika kayıtları
+    gibi HALKA AÇIK kaynaklardan e-posta/subdomain/isim toplar — sızma
+    yapmaz, sadece zaten herkese açık bilgiyi derler. Yine de sadece
+    kendi domain'iniz veya izinli bir hedef için kullanın.""")
+    domain = ask("Hedef domain (örn. example.com)")
+    if not domain:
+        print("[!] Domain boş olamaz.")
+        pause()
+        return
+    source = ask("Kaynak (örn. google, bing, crtsh, duckduckgo — 'all' da yazılabilir ama bazı sürümlerde yavaş/sorunlu olabilir)", "crtsh")
+    limit = ask("Sonuç limiti", "200")
+    run_tool([th_bin, "-d", domain, "-b", source, "-l", limit])
+    pause()
+
+
+def menu_steghide():
+    sh_bin = shutil.which("steghide")
+    if not sh_bin:
+        print("""
+[!] 'steghide' bu sistemde kurulu değil veya PATH'te bulunamadı.
+
+Kurmak için:
+    Debian/Ubuntu/Kali : sudo apt install steghide
+
+Kurduktan sonra tekrar deneyin.""")
+        pause()
+        return
+    print("""
+======= STEGHIDE =======
+ 1) Veri çıkar (extract) — bir resim/ses dosyasına gizlenmiş veriyi çıkarır
+ 2) Veri gizle (embed)   — bir dosyayı resim/ses dosyasının içine gizler
+ 0) Geri
+=========================""")
+    c = ask("Seçiminiz", "0")
+    if c == "1":
+        cover = ask("İçinde gizli veri olduğunu düşündüğünüz dosya (örn. resim.jpg)")
+        if not cover or not os.path.isfile(cover):
+            print("[!] Dosya bulunamadı.")
+            pause()
+            return
+        print("[*] Parola soracak (biliyorsanız girin, bilmiyorsanız boş bırakıp Enter'a basmayı deneyebilirsiniz).")
+        run_tool([sh_bin, "extract", "-sf", cover])
+    elif c == "2":
+        cover = ask("Taşıyıcı dosya (örn. resim.jpg)")
+        secret = ask("Gizlenecek dosya (örn. gizli.txt)")
+        out = ask("Çıktı dosya adı", "cikti.jpg")
+        if not cover or not os.path.isfile(cover) or not secret or not os.path.isfile(secret):
+            print("[!] Dosyalardan biri bulunamadı.")
+            pause()
+            return
+        run_tool([sh_bin, "embed", "-cf", cover, "-ef", secret, "-sf", out])
+    else:
+        return
+    pause()
+
+
+def submenu_osint():
+    while True:
+        print("""
+========== OSINT / ADLİ ANALİZ ARAÇLARI ==========
+ 1) theHarvester (e-posta/subdomain toplama)
+ 2) Steghide (steganografi — veri çıkar/gizle)
+ 0) Ana menüye dön
+====================================================""")
+        c = ask("Seçiminiz", "0")
+        if c == "1":
+            menu_theharvester()
+        elif c == "2":
+            menu_steghide()
+        elif c == "0":
+            return
+        else:
+            print("[!] Geçersiz seçim.")
+
+
+def submenu_recon(sess):
+    while True:
+        print("""
+========== AĞ KEŞİF ARAÇLARI ==========
+ 1) Hızlı tarama (sık kullanılan portlar)
+ 2) Özel port aralığı tara
+ 3) Son tarama sonuçlarını görüntüle
+ 4) Rapor oluştur
+ 0) Ana menüye dön
+========================================""")
+        c = ask("Seçiminiz", "0")
+        if c == "1":
+            menu_scan(sess, None, "Hızlı tarama")
+        elif c == "2":
+            spec = ask("Port listesi/aralığı (örn. 1-1000 veya 22,80,443)", "1-1000")
+            menu_scan(sess, spec, "Özel port taraması")
+        elif c == "3":
+            menu_view_results(sess)
+        elif c == "4":
+            menu_report(sess)
+        elif c == "0":
+            return
+        else:
+            print("[!] Geçersiz seçim.")
+
+
+def submenu_password(sess):
+    while True:
+        print("""
+============ PAROLA ARAÇLARI ============
+ 1) Parola hash kırma (John the Ripper)
+ 0) Ana menüye dön
+==========================================""")
+        c = ask("Seçiminiz", "0")
+        if c == "1":
+            menu_john(sess)
+        elif c == "0":
+            return
+        else:
+            print("[!] Geçersiz seçim.")
+
+
+def submenu_web(sess):
+    while True:
+        print("""
+========== WEB UYGULAMA ARAÇLARI ==========
+ 1) Web zafiyet taraması (Nikto)
+ 2) Dizin/dosya keşfi (Gobuster/dirb)
+ 3) SQL injection testi (SQLMap — düşük risk)
+ 0) Ana menüye dön
+============================================""")
+        c = ask("Seçiminiz", "0")
+        if c == "1":
+            menu_nikto(sess)
+        elif c == "2":
+            menu_gobuster(sess)
+        elif c == "3":
+            menu_sqlmap(sess)
+        elif c == "0":
+            return
+        else:
+            print("[!] Geçersiz seçim.")
+
+
 def main_menu():
     sess = Session()
     print(BANNER)
@@ -365,39 +578,31 @@ def main_menu():
     while True:
         print("""
 ================= ANA MENÜ =================
- 1) Hızlı tarama (sık kullanılan portlar)
- 2) Özel port aralığı tara
- 3) Son tarama sonuçlarını görüntüle
- 4) Rapor oluştur
- 5) Bilinen zafiyet referans listesini görüntüle
- 6) Parola hash kırma (John the Ripper sarmalayıcı)
- 7) Web zafiyet taraması (Nikto sarmalayıcı)
- 8) Dizin/dosya keşfi (Gobuster/dirb sarmalayıcı)
- 9) SQL injection testi (SQLMap sarmalayıcı — düşük risk)
+ 1) Ağ Keşif Araçları
+ 2) Parola Araçları
+ 3) Web Uygulama Araçları
+ 4) Ağ Trafiği Analizi (Wireshark/tshark)
+ 5) OSINT / Adli Analiz Araçları
  0) Çıkış
 =============================================""")
         choice = ask("Seçiminiz", "0")
         if choice == "1":
-            menu_scan(sess, None, "Hızlı tarama")
+            submenu_recon(sess)
         elif choice == "2":
-            spec = ask("Port listesi/aralığı (örn. 1-1000 veya 22,80,443)", "1-1000")
-            menu_scan(sess, spec, "Özel port taraması")
+            submenu_password(sess)
         elif choice == "3":
-            menu_view_results(sess)
+            submenu_web(sess)
         elif choice == "4":
-            menu_report(sess)
+            submenu_traffic()
         elif choice == "5":
-            menu_vulndb()
-        elif choice == "6":
-            menu_john(sess)
-        elif choice == "7":
-            menu_nikto(sess)
-        elif choice == "8":
-            menu_gobuster(sess)
-        elif choice == "9":
-            menu_sqlmap(sess)
+            submenu_osint()
         elif choice == "0":
-            print("Çıkılıyor.")
+            print("""
+Çıkılıyor.
+
+    Thanks for using my tool.
+    And don't forget they are watching u.
+""")
             break
         else:
             print("[!] Geçersiz seçim.")
@@ -407,5 +612,10 @@ if __name__ == "__main__":
     try:
         main_menu()
     except (KeyboardInterrupt, EOFError):
-        print("\nÇıkılıyor.")
+        print("""
+Çıkılıyor.
+
+    Thanks for using my tool.
+    And don't forget they are watching u.
+""")
         sys.exit(0)
